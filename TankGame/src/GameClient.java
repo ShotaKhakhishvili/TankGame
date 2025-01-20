@@ -3,6 +3,8 @@ import java.awt.*;
 import java.awt.event.*;
 import java.io.*;
 import java.net.Socket;
+import java.util.List;
+import java.util.ArrayList;
 
 /**
  * GameClient connects to the server, receives "playerId",
@@ -26,60 +28,84 @@ public class GameClient extends JFrame {
     // The ID of this client, as assigned by the server
     private int localPlayerId = -1;
 
-    public static void main(String[] args) {
+    // --- Color Palette (similar to the ServerGUI) ---
+    private static final Color COLOR_BG_DARK   = new Color(0x41436A); // dark bluish
+    private static final Color COLOR_PURPLE    = new Color(0x984063); // purple
+    private static final Color COLOR_HOT_PINK  = new Color(0xF64668); // hot pink
+    private static final Color COLOR_PEACH     = new Color(0xFE9677); // peach
+    private static final Color COLOR_WHITE     = Color.WHITE;
+
+    public static void main(String... args) {
         new GameClient().setVisible(true);
     }
 
-    public GameClient(Socket socket, int localPlayerId,ObjectOutputStream out, ObjectInputStream in){
+    /**
+     * Constructor used AFTER successful login (displays the actual game).
+     */
+    public GameClient(Socket socket, int localPlayerId, ObjectOutputStream out, ObjectInputStream in) {
         this.socket = socket;
         this.localPlayerId = localPlayerId;
         this.out = out;
         this.in = in;
 
         setTitle("Tank Game");
-        repaint();
         setExtendedState(JFrame.MAXIMIZED_BOTH);
         setDefaultCloseOperation(EXIT_ON_CLOSE);
 
-        gamePanel = new GamePanel(username);
+        // We'll use the username from the login screen
+        // but it's passed in or stored. Right now, the simplest approach:
+        // If you need the username, store it somewhere or pass it from the login constructor.
+        // gamePanel = new GamePanel(username);
+        gamePanel = new GamePanel(username); // as is
+
         this.add(gamePanel, BorderLayout.CENTER);
 
-//        // Connect to the server
+        // Connect to the server
         connectToServer();
 
-        // Setup input listeners on the gamePanel
-        this.setupInputListeners();
+        // Setup input listeners (WASD, mouse) on the gamePanel
+        setupInputListeners();
 
-        // Make sure gamePanel has focus
+        // Make sure the panel can receive focus
         gamePanel.setFocusable(true);
         gamePanel.requestFocusInWindow();
         gamePanel.setVisible(true);
     }
 
+    /**
+     * Constructor for the initial login screen.
+     */
     public GameClient() {
         super("Login Screen");
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setSize(400, 250);
         setLocationRelativeTo(null);
 
+        // Main panel for the login form
         JPanel panel = new JPanel(new GridBagLayout());
+        panel.setBackground(COLOR_BG_DARK);
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5,5,5,5);
 
         JLabel userLabel = new JLabel("Username:");
+        styleLabel(userLabel, COLOR_PEACH);
         usernameField = new JTextField(15);
 
         JLabel hostLabel = new JLabel("Host:");
+        styleLabel(hostLabel, COLOR_PEACH);
         hostField = new JTextField("localhost", 15);
 
         JLabel portLabel = new JLabel("Port:");
+        styleLabel(portLabel, COLOR_PEACH);
         portField = new JTextField("12345", 6);
 
         JButton loginButton = new JButton("Login");
+        styleButton(loginButton, COLOR_PURPLE, COLOR_WHITE);
+
         loginButton.addActionListener(e -> onLogin());
 
         statusLabel = new JLabel("");
-        statusLabel.setForeground(Color.RED);
+        styleLabel(statusLabel, COLOR_HOT_PINK);
 
         gbc.gridx=0; gbc.gridy=0; panel.add(userLabel, gbc);
         gbc.gridx=1; gbc.gridy=0; panel.add(usernameField, gbc);
@@ -91,13 +117,32 @@ public class GameClient extends JFrame {
         gbc.gridx=1; gbc.gridy=2; panel.add(portField, gbc);
 
         gbc.gridwidth=2;
-        gbc.gridx=0; gbc.gridy=3;
+        gbc.gridx=0;
+        gbc.gridy=3;
         panel.add(loginButton, gbc);
 
         gbc.gridy=4;
         panel.add(statusLabel, gbc);
 
         add(panel);
+    }
+
+    /**
+     * Utility method to style a JLabel with a custom color.
+     */
+    private void styleLabel(JLabel label, Color color) {
+        label.setForeground(color);
+        label.setFont(new Font("SansSerif", Font.BOLD, 14));
+    }
+
+    /**
+     * Utility method to style a JButton consistently.
+     */
+    private void styleButton(JButton button, Color bgColor, Color fgColor) {
+        button.setBackground(bgColor);
+        button.setForeground(fgColor);
+        button.setFocusPainted(false);
+        button.setFont(new Font("SansSerif", Font.BOLD, 14));
     }
 
     private void onLogin() {
@@ -110,17 +155,17 @@ public class GameClient extends JFrame {
             return;
         }
 
-        try{
+        try {
             if(socket != null && socket.isConnected())
                 socket.close();
 
             socket = new Socket(host, port);
-
             socket.setSoTimeout(2000);
 
             ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
             ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
 
+            // Server sends us our assigned playerId
             localPlayerId = in.readInt();
 
             // 1) Send the desired username
@@ -131,18 +176,18 @@ public class GameClient extends JFrame {
 
             Object input = in.readObject();
 
-            System.out.println(input.getClass());
-
             if (input instanceof LoginAttempt) {
-                System.out.println(((LoginAttempt) input).accessAllowed);
                 if (((LoginAttempt) input).accessAllowed) {
+                    // Switch to the GameClient main window
                     new GameClient(socket, localPlayerId, out, in).setVisible(true);
                     this.dispose();
+                } else {
+                    statusLabel.setText("Login rejected by server.");
                 }
             }
 
         } catch (IOException e) {
-            statusLabel.setText("Some problem occurred while connection");
+            statusLabel.setText("Connection error. Check host/port.");
             e.printStackTrace();
         } catch (ClassNotFoundException e) {
             throw new RuntimeException(e);
@@ -160,8 +205,8 @@ public class GameClient extends JFrame {
     }
 
     /**
-     * Continuously reads GameState objects from the server.
-     * If the server stops or connection is lost, show error window and exit.
+     * Continuously read GameState objects from the server.
+     * If server stops or connection is lost, show error message and exit.
      */
     private void listenForGameState() {
         try {
@@ -193,7 +238,7 @@ public class GameClient extends JFrame {
     }
 
     /**
-     * Attach key/mouse listeners to the gamePanel so we can capture user input.
+     * Capture user input: WASD keys for movement, mouse for aiming/shooting.
      */
     private void setupInputListeners() {
         // KeyListener for WASD
@@ -296,7 +341,7 @@ public class GameClient extends JFrame {
     }
 
     /**
-     * Compute turret angle from the local player's tank center to the mouse coordinates.
+     * Compute turret angle from local player's tank center to the mouse coordinates.
      */
     private void updateTurretAngle(MouseEvent e) {
         GameState gs = gamePanel.getGameState();
@@ -310,35 +355,31 @@ public class GameClient extends JFrame {
                 break;
             }
         }
-        if (localPlayer == null) return; // local player not found (maybe dead?)
+        if (localPlayer == null) return; // local player not found or dead
 
-        // Calculate center of this player's tank in server coordinates
+        // Tank center in server coordinates
         double tankCenterX = localPlayer.x + localPlayer.width / 2.0;
         double tankCenterY = localPlayer.y + localPlayer.height / 2.0;
 
-        // Get current panel dimensions
+        // Panel dimensions
         int panelWidth = gamePanel.getWidth();
         int panelHeight = gamePanel.getHeight();
 
-        // Convert mouse coordinates (panel space) to server coordinate space (1920x1080)
+        // Convert mouse coords to "server" coords (assuming 1920x1080 game world)
         double scaledMouseX = (e.getX() / (double) panelWidth) * 1920;
         double scaledMouseY = (e.getY() / (double) panelHeight) * 1080;
 
-        // Calculate the angle from the tank center to the scaled mouse position
+        // Calculate angle from tank center to mouse position
         double angle = Math.atan2(scaledMouseY - tankCenterY, scaledMouseX - tankCenterX);
 
-        // Update the command with the new angle
         currentCommand.turretAngle = angle;
         sendCommand();
     }
 
-
-
     /**
-     * Shows a small error window indicating a connection problem, then exits.
+     * Show a dialog if connection is lost, then exit.
      */
     private void showConnectionError(String message) {
-        // Because we are on a background thread, ensure we do this on EDT
         SwingUtilities.invokeLater(() -> {
             JOptionPane.showMessageDialog(
                     this,
