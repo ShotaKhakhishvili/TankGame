@@ -4,12 +4,12 @@ import java.util.*;
 public class GameLogic {
 
     // The total map size
-    private final int MAP_WIDTH = 1920;
-    private final int MAP_HEIGHT = 1080;
+    private static final int MAP_WIDTH = 1920;
+    private static final int MAP_HEIGHT = 1080;
 
     // We shrink top/bottom by these margins
-    private static final int TOP_MARGIN = 50;
-    private static final int BOTTOM_MARGIN = 50;
+    private static final int TOP_MARGIN = 10;
+    private static final int BOTTOM_MARGIN = 10;
 
     // Player data by ID
     private Map<Integer, Player> players = new HashMap<>();
@@ -19,12 +19,16 @@ public class GameLogic {
     private List<ServerBullet> bullets = new ArrayList<>();
 
     // Single buff on the map
-    private ServerBuff buff;
+    private List<ServerBuff> buffs = new ArrayList<>();
 
     public GameLogic() {
         // Initialize the buff
-        buff = new ServerBuff(300, 300, 40);
-        buff.visible = true;
+        for(int i = 0; i < 5; i++){
+            ServerBuff buff = new ServerBuff(0,0,40);
+            buff.relocate(MAP_WIDTH,MAP_HEIGHT);
+            buffs.add(buff);
+            buffs.get(i).visible = true;
+        }
     }
 
     /**
@@ -35,10 +39,10 @@ public class GameLogic {
         p.playerId = playerId;
         p.x = 100;
         p.y = 100;
-        p.width = 50;
-        p.height = 50;
-        p.tubeWidth = 40;
-        p.tubeHeight = 15;
+        p.width = p.defaultWidth = 50;
+        p.height = p.defaultHeight = 50;
+        p.tubeWidth = p.defaultTubeWidth = 40;
+        p.tubeHeight = p.defaultTubeHeight = 15;
         p.health = 100;
 
         // So the player can shoot immediately
@@ -96,7 +100,7 @@ public class GameLogic {
             if (cmd == null) continue;
 
             // Movement
-            int speed = 5;
+            int speed = (int)(5 * p.speedMultiplier);
             if (cmd.moveUp)    p.y -= speed;
             if (cmd.moveDown)  p.y += speed;
             if (cmd.moveLeft)  p.x -= speed;
@@ -125,7 +129,7 @@ public class GameLogic {
     private void spawnBullet(Player p) {
         long now = System.currentTimeMillis();
         // 250 ms = 0.25s
-        if (now - p.lastShotTime < 250) {
+        if (now - p.lastShotTime < 250 / p.reloadSpeedMultiplier) {
             return; // too soon
         }
         p.lastShotTime = now;
@@ -167,14 +171,14 @@ public class GameLogic {
                 int radius = p.width / 2;
 
                 // approximate bullet as circle with radius diameter/2
-                int bulletRadius = b.diameter / 2;
+                int bulletRadius = (int)(p.bulletSizeMultiplier * b.diameter / 2);
 
                 if (circleCollision(centerX, centerY, radius,
                         b.x + bulletRadius, b.y + bulletRadius, bulletRadius)) {
                     // bullet hit a player
                     if (b.ownerId != p.playerId) {
                         // It's not their own bullet -> do damage
-                        p.health -= 25;
+                        p.health -= (int) (25 * players.get(b.ownerId).damageMultiplier);
 
                         // remove bullet
                         it.remove();
@@ -235,60 +239,38 @@ public class GameLogic {
      * Collisions with the buff (shrink effect)
      */
     private void checkBuffCollisions() {
-        if (!buff.visible) return;
+        if (buffs.isEmpty()) return;
 
         for (Player p : players.values()) {
             if (p.dead) continue; // dead players can't pick up buff
 
-            int centerX = p.x + p.width/2;
-            int centerY = p.y + p.height/2;
-            int radius = p.width/2;
+            for(ServerBuff buff : buffs){
+                if(!buff.visible) continue;
 
-            int buffCenterX = buff.x + buff.diameter/2;
-            int buffCenterY = buff.y + buff.diameter/2;
-            int buffRadius = buff.diameter/2;
+                int centerX = p.x + p.width/2;
+                int centerY = p.y + p.height/2;
+                int radius = p.width/2;
 
-            if (circleCollision(centerX, centerY, radius,
-                    buffCenterX, buffCenterY, buffRadius)) {
-                // pick up buff
-                buff.visible = false;
+                int buffCenterX = buff.x + buff.diameter/2;
+                int buffCenterY = buff.y + buff.diameter/2;
+                int buffRadius = buff.diameter/2;
 
-                // respawn buff after random time
-                new Thread(() -> {
-                    try {
-                        Thread.sleep(5000 + (int)(Math.random()*5000));
-                        buff.relocate(MAP_WIDTH, MAP_HEIGHT);
-                    } catch (InterruptedException ignored) {}
-                }).start();
+                if (circleCollision(centerX, centerY, radius,
+                        buffCenterX, buffCenterY, buffRadius)) {
+                    // pick up buff
+                    buff.visible = false;
 
-                // shrink by factor 0.5 for 10 seconds
-                final double factor = 0.5;
-                p.width      = Math.max((int)(p.width      * factor), 10);
-                p.height     = Math.max((int)(p.height     * factor), 10);
-                p.tubeWidth  = Math.max((int)(p.tubeWidth  * factor), 10);
-                p.tubeHeight = Math.max((int)(p.tubeHeight * factor), 5);
+                    // respawn buff after random time
+                    new Thread(() -> {
+                        try {
+                            Thread.sleep(5000 + (int)(Math.random()*5000));
+                            buff.relocate(MAP_WIDTH, MAP_HEIGHT);
+                            buff.setRandomBuffType();
+                        } catch (InterruptedException ignored) {}
+                    }).start();
 
-                // clamp after changing size
-                p.x = Math.max(0, Math.min(MAP_WIDTH - p.width, p.x));
-                p.y = Math.max(TOP_MARGIN, Math.min(MAP_HEIGHT - BOTTOM_MARGIN - p.height, p.y));
-
-                // revert after 10s
-                new Thread(() -> {
-                    try {
-                        Thread.sleep(10000);
-                    } catch (InterruptedException ignored) {}
-
-                    p.width      = Math.max((int)(p.width      / factor), 10);
-                    p.height     = Math.max((int)(p.height     / factor), 10);
-                    p.tubeWidth  = Math.max((int)(p.tubeWidth  / factor), 10);
-                    p.tubeHeight = Math.max((int)(p.tubeHeight / factor), 5);
-
-                    // clamp
-                    p.x = Math.max(0, Math.min(MAP_WIDTH - p.width, p.x));
-                    p.y = Math.max(TOP_MARGIN, Math.min(MAP_HEIGHT - BOTTOM_MARGIN - p.height, p.y));
-                }).start();
-
-                break;
+                    ServerBuff.applyBuff(p, buff.buffType);
+                }
             }
         }
     }
@@ -324,24 +306,35 @@ public class GameLogic {
             GameState.BulletData bd = new GameState.BulletData();
             bd.x = b.x;
             bd.y = b.y;
-            bd.diameter = b.diameter;
+            bd.diameter = (int)(b.diameter * players.get(b.ownerId).bulletSizeMultiplier);
             gs.bullets.add(bd);
         }
 
-        GameState.BuffData buffData = new GameState.BuffData();
-        buffData.x = buff.x;
-        buffData.y = buff.y;
-        buffData.diameter = buff.diameter;
-        buffData.color = colorToHex(buff.color);
-        buffData.visible = buff.visible;
-        gs.buff = buffData;
+        List<GameState.BuffData> buffDatas = new ArrayList<>();
+
+        for(ServerBuff buff : buffs){
+            if(!buff.visible)continue;
+            GameState.BuffData buffData = new GameState.BuffData();
+
+            buffData.x = buff.x;
+            buffData.y = buff.y;
+            buffData.diameter = buff.diameter;
+            buffData.color = colorToHex(buff.color);
+            buffData.visible = buff.visible;
+
+            buffDatas.add(buffData);
+        }
+        gs.buffs = buffDatas;
 
         return gs;
     }
 
     private static final Color[] BUFF_COLORS = {
-            new Color(217,162,134),
-            new Color(155,72,72)
+            new Color(174, 195, 183),   // Size decrease
+            new Color(224, 108, 117),   // Damage increase
+            new Color(139, 48, 48),     // Bullet size increase
+            new Color(106, 192, 153),   // Speed increase
+            new Color(95, 158, 160)     // Reload speed increase
     };
     private static final Random RNG = new Random();
 
@@ -353,18 +346,155 @@ public class GameLogic {
         public int x, y, diameter;
         public Color color;
         public boolean visible = true;
+        public GameState.BuffData.buffType buffType;
 
         public ServerBuff(int x, int y, int diameter) {
             this.x = x;
             this.y = y;
             this.diameter = diameter;
-            this.color = BUFF_COLORS[RNG.nextInt(BUFF_COLORS.length)];
+            setRandomBuffType();
+        }
+
+        public void setRandomBuffType(){
+            GameState.BuffData.buffType[] allEnums = GameState.BuffData.buffType.values();
+            Random random = new Random();
+            buffType = allEnums[random.nextInt(allEnums.length)];
+            switch (buffType){
+                case sizeDecrease:
+                    color = BUFF_COLORS[0];
+                    break;
+                case speedIncrease:
+                    color = BUFF_COLORS[3];
+                    break;
+                case bulletIncrease:
+                    color = BUFF_COLORS[2];
+                    break;
+                case damageIncrease:
+                    color = BUFF_COLORS[1];
+                    break;
+                case reloadSpeedIncrease:
+                    color = BUFF_COLORS[4];
+                    break;
+            }
+        }
+
+        public static void applyBuff(Player p, GameState.BuffData.buffType buff){
+            switch (buff){
+                case sizeDecrease:
+                    buff_sizeDecrease(p);
+                    break;
+                case speedIncrease:
+                    buff_speedIncrease(p);
+                    break;
+                case bulletIncrease:
+                    buff_bulletIncrease(p);
+                    break;
+                case damageIncrease:
+                    buff_damageIncrease(p);
+                    break;
+                case reloadSpeedIncrease:
+                    buff_reloadSpeedIncrease(p);
+                    break;
+            }
+        }
+        public static void buff_sizeDecrease(Player p){
+            // shrink by factor 0.5 for 10 seconds
+            final double factor = 0.5;
+            final long effectTime = 10000;
+
+            p.sizeMultiplier *= factor;
+
+            p.width      = (int)(p.defaultWidth * p.sizeMultiplier);
+            p.height     = (int)(p.defaultHeight * p.sizeMultiplier);
+            p.tubeWidth  = (int)(p.defaultTubeWidth * p.sizeMultiplier);
+            p.tubeHeight = (int)(p.defaultTubeHeight * p.sizeMultiplier);
+
+            // clamp after changing size
+            p.x = Math.max(0, Math.min(MAP_WIDTH - p.width, p.x));
+            p.y = Math.max(TOP_MARGIN, Math.min(MAP_HEIGHT - BOTTOM_MARGIN - p.height, p.y));
+
+            // revert after 10s
+            new Thread(() -> {
+                try {
+                    Thread.sleep(effectTime);
+                } catch (InterruptedException ignored) {}
+
+                p.sizeMultiplier /= factor;
+
+                p.width      = (int)(p.defaultWidth * p.sizeMultiplier);
+                p.height     = (int)(p.defaultHeight * p.sizeMultiplier);
+                p.tubeWidth  = (int)(p.defaultTubeWidth * p.sizeMultiplier);
+                p.tubeHeight = (int)(p.defaultTubeHeight * p.sizeMultiplier);
+
+                // clamp
+                p.x = Math.max(0, Math.min(MAP_WIDTH - p.width, p.x));
+                p.y = Math.max(TOP_MARGIN, Math.min(MAP_HEIGHT - BOTTOM_MARGIN - p.height, p.y));
+            }).start();
+        }
+        public static void buff_bulletIncrease(Player p){
+            double factor = 2;
+            long effectTime = 10000;
+
+            p.bulletSizeMultiplier *= factor;
+
+            // revert after 10s
+            new Thread(() -> {
+                try {
+                    Thread.sleep(effectTime);
+                } catch (InterruptedException ignored) {}
+
+                p.bulletSizeMultiplier /= factor;
+            }).start();
+        }
+        public static void buff_damageIncrease(Player p){
+            double factor = 1.5;
+            long effectTime = 10000;
+
+            p.damageMultiplier *= factor;
+
+            // revert after 10s
+            new Thread(() -> {
+                try {
+                    Thread.sleep(effectTime);
+                } catch (InterruptedException ignored) {}
+
+                p.damageMultiplier /= factor;
+            }).start();
+        }
+        public static void buff_speedIncrease(Player p){
+            double factor = 1.25;
+            long effectTime = 15000;
+
+            p.speedMultiplier *= factor;
+
+            // revert after 15s
+            new Thread(() -> {
+                try {
+                    Thread.sleep(effectTime);
+                } catch (InterruptedException ignored) {}
+
+                p.speedMultiplier /= factor;
+            }).start();
+        }
+        public static void buff_reloadSpeedIncrease(Player p){
+            double factor = 2;
+            long effectTime = 20000;
+
+            p.reloadSpeedMultiplier *= factor;
+
+            // revert after 20s
+            new Thread(() -> {
+                try {
+                    Thread.sleep(effectTime);
+                } catch (InterruptedException ignored) {}
+
+                p.reloadSpeedMultiplier /= factor;
+            }).start();
         }
 
         public void relocate(int maxW, int maxH) {
             x = RNG.nextInt(Math.max(1, maxW - diameter));
             y = RNG.nextInt(Math.max(1, maxH - diameter));
-            color = BUFF_COLORS[RNG.nextInt(BUFF_COLORS.length)];
             visible = true;
         }
     }
@@ -396,9 +526,18 @@ public class GameLogic {
         String username = "player";
         int score;
         int x, y;
+        int defaultWidth, defaultHeight;
+        int defaultTubeWidth, defaultTubeHeight;
         int width, height;
         int tubeWidth, tubeHeight;
         double turretAngle;
+
+        double sizeMultiplier = 1;
+        double bulletSizeMultiplier = 1;
+        double damageMultiplier = 1;
+        double speedMultiplier = 1;
+        double reloadSpeedMultiplier = 1;
+
         int health = 100;
 
         long lastShotTime;

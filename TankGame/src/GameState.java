@@ -16,7 +16,7 @@ public class GameState implements Serializable {
     public List<BulletData> bullets = new ArrayList<>();
 
     // Single buff (or you could support multiple)
-    public BuffData buff;
+    public List<BuffData> buffs;
 
     // Nested data classes
     public static class PlayerData implements Serializable {
@@ -36,6 +36,7 @@ public class GameState implements Serializable {
     }
 
     public static class BuffData implements Serializable {
+        public enum buffType {sizeDecrease, bulletIncrease, damageIncrease, speedIncrease, reloadSpeedIncrease};
         public int x, y, diameter;
         public String color;  // We'll send color as a string to be interpreted by client
         public boolean visible;

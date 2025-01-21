@@ -112,11 +112,16 @@ public class GamePanel extends JPanel {
         }
 
         // Draw buff if visible
-        if (currentState.buff != null && currentState.buff.visible) {
-            Color buffColor = Color.decode(currentState.buff.color);
-            g2d.setColor(buffColor);
-            g2d.fillOval(currentState.buff.x, currentState.buff.y,
-                    currentState.buff.diameter, currentState.buff.diameter);
+
+        if (currentState.buffs != null) {
+            for(int i = 0; i < currentState.buffs.size(); i++) {
+                if(currentState.buffs.get(i).visible) {
+                    Color buffColor = Color.decode(currentState.buffs.get(i).color);
+                    g2d.setColor(buffColor);
+                    g2d.fillOval(currentState.buffs.get(i).x, currentState.buffs.get(i).y,
+                            currentState.buffs.get(i).diameter, currentState.buffs.get(i).diameter);
+                }
+            }
         }
 
         // --- Done drawing the scaled world. Restore original transform ---
